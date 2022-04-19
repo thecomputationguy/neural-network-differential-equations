@@ -27,8 +27,9 @@ class ODE_NN(nn.Module):
             number of layers, by default 1
         """        
         super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.dt = dt
-        self._X_reshaped = torch.Tensor(X.reshape((1, X.shape[0], X.shape[1])))
+        self._X_reshaped = torch.Tensor(X.reshape((1, X.shape[0], X.shape[1]))).to(self.device)
 
         self._num_trajectories = self._X_reshaped.shape[0] # S
         self._num_timesteps = self._X_reshaped.shape[1] # N
@@ -40,8 +41,8 @@ class ODE_NN(nn.Module):
 
         self.model = nn.Sequential(
             nn.Linear(self._num_dimensions, self.num_neurons), 
-            nn.Tanh(), 
-            nn.Linear(self.num_neurons, self._num_dimensions))
+            nn.Tanh(),
+            nn.Linear(self.num_neurons, self._num_dimensions)).to(self.device)
         print(self.model)
         self._losses = []
 
@@ -52,8 +53,8 @@ class ODE_NN(nn.Module):
                   'AB': lm.Adams_Bashforth,
                   'BDF': lm.backward_difference_formula}
         self._method = self._switch[scheme](M)
-        self.alpha = np.float32(-self._method.alpha[::-1])
-        self.beta = np.float32(self._method.beta[::-1])
+        self.alpha = torch.from_numpy(np.float32(-self._method.alpha[::-1])).to(self.device)
+        self.beta = torch.from_numpy(np.float32(self._method.beta[::-1])).to(self.device)
 
     def forward(self, X) -> torch.Tensor:        
         _X_reshaped = torch.reshape(X, (self._num_trajectories*(self._num_timesteps - self.M), self._num_dimensions))
@@ -69,9 +70,9 @@ class ODE_NN(nn.Module):
         torch.Tensor
             y_n
         """              
-        y = self.alpha[0] * self._X_reshaped[:, self.M:, :] + self.dt * self.beta[0] * self.model(torch.Tensor(self._X_reshaped[:, self.M:, :]))
+        y = self.alpha[0] * self._X_reshaped[:, self.M:, :] + self.dt * self.beta[0] * self.model(self._X_reshaped[:, self.M:, :])
         for m in range(1, self.M + 1):
-            y = y + self.alpha[m] * self._X_reshaped[:, self.M-m:-m, :] + self.dt * self.beta[m] * self.model(torch.Tensor(self._X_reshaped[:, self.M-m:-m, :]))
+            y = y + self.alpha[m] * self._X_reshaped[:, self.M-m:-m, :] + self.dt * self.beta[m] * self.model(self._X_reshaped[:, self.M-m:-m, :])
 
         return y
 
@@ -96,7 +97,7 @@ class ODE_NN(nn.Module):
         for epoch in range(epochs):
             optimizer.zero_grad()            
             y = self._y_predicted().reshape((-1, self._num_dimensions))
-            loss = self._num_dimensions * torch.sum(y**2)
+            loss = self._num_dimensions * torch.sum(y**2).to(self.device)
             self._losses.append(loss.detach())
 
             if epoch == epochs-1:
